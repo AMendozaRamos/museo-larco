@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Museo Larco - Guía Aumentada WebAR</title>
+
+  <!-- Librerías A-Frame + AR.js -->
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/aframe-ar.js@3.0.2/dist/aframe-ar.min.js"></script>
+
+  <style>
+    /* RESET y configuración base */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', Roboto, system-ui, sans-serif;
+      background: #111;
+      color: #fff;
+      overflow: hidden;
+      height: 100vh;
+      width: 100vw;
+      touch-action: none;
+    }
+
+    /* La escena AR ocupa toda la pantalla */
+    a-scene {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+    }
+
+    /* ---------- OVERLAY DE UI (por encima de la cámara) ---------- */
+    #ui-overlay {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      z-index: 10;
+      pointer-events: none; /* Deja pasar toques a la escena AR si es necesario */
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-end;
+      padding: 16px;
+      padding-bottom: 20px;
+      background: linear-gradient(0deg, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0) 100%);
+      transition: opacity 0.4s ease;
+    }
+    #ui-overlay.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    /* TARJETA INFORMATIVA (interactiva) */
+    #info-card {
+      pointer-events: auto;
+      background: rgba(20, 20, 30, 0.92);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-radius: 24px 24px 16px 16px;
+      padding: 20px 18px;
+      width: 100%;
+      max-width: 480px;
+      max-height: 65vh;
+      overflow-y: auto;
+      border: 1px solid rgba(255, 215, 0, 0.3);
+      box-shadow: 0 8px 40px rgba(0,0,0,0.7);
+      transition: transform 0.3s ease;
+      scrollbar-width: thin;
+      scrollbar-color: #f0c040 #222;
+    }
+    #info-card::-webkit-scrollbar { width: 4px; }
+    #info-card::-webkit-scrollbar-track { background: #222; border-radius: 8px; }
+    #info-card::-webkit-scrollbar-thumb { background: #f0c040; border-radius: 8px; }
+
+    /* Cabecera de la tarjeta */
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    #piece-title {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #f0c040;
+      letter-spacing: -0.5px;
+      line-height: 1.2;
+      flex: 1;
+    }
+    .favorite-btn {
+      background: none;
+      border: none;
+      font-size: 2rem;
+      cursor: pointer;
+      padding: 0 6px;
+      transition: transform 0.2s;
+      pointer-events: auto;
+      line-height: 1;
+      filter: drop-shadow(0 0 4px rgba(0,0,0,0.5));
+    }
+    .favorite-btn:active { transform: scale(1.3); }
+    .favorite-btn.fav { color: #ff3b30; text-shadow: 0 0 12px #ff3b3080; }
+    .favorite-btn:not(.fav) { color: #888; }
+
+    /* Cuerpo: imagen + descripción */
+    .card-body {
+      display: flex;
+      flex-direction: row;
+      gap: 14px;
+      margin-top: 6px;
+      align-items: flex-start;
+    }
+    .thumb-img {
+      width: 80px;
+      height: 80px;
+      min-width: 80px;
+      border-radius: 16px;
+      background: #2a2a3a;
+      object-fit: cover;
+      border: 2px solid #444;
+      cursor: zoom-in;
+      transition: 0.2s;
+    }
+    .thumb-img:active { transform: scale(0.95); }
+    #piece-desc {
+      font-size: 0.95rem;
+      line-height: 1.5;
+      color: #e0e0e0;
+      font-weight: 400;
+      flex: 1;
+      margin: 0;
+      max-height: 100px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+
+    /* Controles de audio y subtítulos */
+    .audio-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 14px;
+      background: rgba(255,255,255,0.06);
+      padding: 10px 14px;
+      border-radius: 40px;
+      border: 1px solid #3a3a4a;
+    }
+    .audio-btn {
+      background: #f0c040;
+      border: none;
+      color: #111;
+      font-weight: 700;
+      padding: 8px 20px;
+      border-radius: 40px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: 0.2s;
+      white-space: nowrap;
+      pointer-events: auto;
+    }
+    .audio-btn:active { transform: scale(0.95); background: #d4a830; }
+    .audio-btn.playing { background: #e74c3c; color: #fff; }
+    .volume-control {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex: 1;
+    }
+    .volume-control input[type="range"] {
+      width: 100%;
+      height: 4px;
+      -webkit-appearance: none;
+      background: #555;
+      border-radius: 4px;
+      outline: none;
+    }
+    .volume-control input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #f0c040;
+      cursor: pointer;
+    }
+    .vol-icon { font-size: 1.2rem; opacity: 0.7; }
+
+    #subtitles {
+      margin-top: 8px;
+      font-size: 1.05rem;
+      font-weight: 500;
+      color: #fff;
+      background: rgba(0,0,0,0.75);
+      padding: 10px 16px;
+      border-radius: 40px;
+      text-align: center;
+      min-height: 3.2rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid #f0c04060;
+      backdrop-filter: blur(4px);
+      width: 100%;
+      transition: 0.2s;
+      line-height: 1.4;
+    }
+    #subtitles:empty::before {
+      content: "🎧 Presiona 'Escuchar' para activar subtítulos";
+      color: #aaa;
+      font-weight: 300;
+      font-size: 0.9rem;
+    }
+
+    /* MODAL para imagen ampliada */
+    #image-modal {
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.92);
+      z-index: 100;
+      display: none;
+      justify-content: center;
+      align-items: center;
+      pointer-events: auto;
+      backdrop-filter: blur(8px);
+    }
+    #image-modal.active { display: flex; }
+    #image-modal img {
+      max-width: 92%;
+      max-height: 92%;
+      border-radius: 20px;
+      border: 3px solid #f0c040;
+      box-shadow: 0 0 60px rgba(240,192,64,0.3);
+      object-fit: contain;
+    }
+    #image-modal .close-modal {
+      position: absolute;
+      top: 30px;
+      right: 30px;
+      font-size: 2.8rem;
+      color: #fff;
+      background: rgba(0,0,0,0.6);
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      border: 2px solid #f0c040;
+      font-weight: 300;
+    }
+
+    /* Pantalla de inicio (permisos + instrucciones) */
+    #start-screen {
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: radial-gradient(circle at 50% 30%, #1a1a2e, #0a0a12);
+      z-index: 200;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      padding: 30px;
+      text-align: center;
+      gap: 20px;
+      transition: opacity 0.6s;
+    }
+    #start-screen.hidden { opacity: 0; pointer-events: none; }
+    #start-screen h1 {
+      font-size: 2.2rem;
+      color: #f0c040;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+    #start-screen p {
+      font-size: 1.1rem;
+      max-width: 400px;
+      color: #ccc;
+      line-height: 1.6;
+    }
+    .start-btn {
+      background: #f0c040;
+      color: #111;
+      border: none;
+      padding: 16px 48px;
+      border-radius: 60px;
+      font-size: 1.4rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: 0.3s;
+      box-shadow: 0 0 40px #f0c04040;
+      margin-top: 10px;
+    }
+    .start-btn:active { transform: scale(0.96); }
+    .privacy-note {
+      font-size: 0.75rem;
+      color: #888;
+      max-width: 360px;
+      margin-top: 20px;
+      border-top: 1px solid #333;
+      padding-top: 20px;
+    }
+    .marker-hint {
+      display: flex;
+      gap: 20px;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin: 8px 0;
+    }
+    .marker-hint span {
+      background: #2a2a3e;
+      padding: 6px 18px;
+      border-radius: 40px;
+      font-size: 0.9rem;
+      border: 1px solid #444;
+      color: #ddd;
+    }
+
+    /* Política de privacidad fija */
+    #privacy-footer {
+      position: fixed;
+      bottom: 6px;
+      right: 12px;
+      z-index: 5;
+      font-size: 0.6rem;
+      color: #666;
+      background: rgba(0,0,0,0.5);
+      padding: 4px 12px;
+      border-radius: 20px;
+      pointer-events: none;
+    }
+
+    /* Ajustes responsivos */
+    @media (max-width: 480px) {
+      #piece-title { font-size: 1.3rem; }
+      .card-body { flex-direction: column; align-items: center; }
+      .thumb-img { width: 100%; height: auto; max-height: 140px; min-width: unset; }
+      #piece-desc { max-height: 80px; font-size: 0.9rem; text-align: center; }
+      .audio-row { flex-wrap: wrap; justify-content: center; }
+      #subtitles { font-size: 0.95rem; min-height: 2.8rem; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ============ PANTALLA DE INICIO ============ -->
+  <div id="start-screen">
+    <h1>🏛️ Museo Larco</h1>
+    <p style="font-size:1.3rem; color:#f0c040;">Guía Aumentada WebAR</p>
+    <p>
+      Apunta tu cámara a los <strong>marcadores numéricos</strong> (0, 1, 2) 
+      colocados junto a las piezas seleccionadas.
+    </p>
+    <div class="marker-hint">
+      <span>📌 Marcador 0</span>
+      <span>📌 Marcador 1</span>
+      <span>📌 Marcador 2</span>
+    </div>
+    <button class="start-btn" id="start-btn">🔓 Iniciar experiencia</button>
+    <div class="privacy-note">
+      <strong>Política de privacidad:</strong> Esta web utiliza la cámara <strong>exclusivamente</strong> para 
+      detectar los marcadores AR. <u>No se graba, almacena ni transmite</u> ningún vídeo o imagen. 
+      Los datos de favoritos se guardan solo en tu navegador (localStorage).
+    </div>
+  </div>
+
+  <!-- ============ ESCENA AR ============ -->
+  <a-scene 
+    id="ar-scene"
+    embedded 
+    arjs="trackingMethod: best; debugUIEnabled: false; detectionMode: mono_and_matrix; matrixCodeType: 3x3;"
+    renderer="antialias: true; alpha: false;"
+    vr-mode-ui="enabled: false"
+    device-orientation-permission-ui="enabled: false"
+  >
+    <!-- Cámara -->
+    <a-camera gvr-camera-ui="enabled: false" id="camera"></a-camera>
+
+    <!-- ===== MARCADOR 0 (Pieza 1) ===== -->
+    <a-marker type="barcode" value="0" id="marker-0">
+      <!-- Modelo 3D: Vaso ceremonial (oro) -->
+      <a-entity touch-controls position="0 0 -0.3" scale="0.4 0.4 0.4">
+        <a-cylinder color="#d4af37" metalness="0.8" roughness="0.2" radius="0.3" height="0.6"></a-cylinder>
+        <a-cylinder color="#b8860b" metalness="0.7" roughness="0.3" radius="0.35" height="0.08" position="0 0.34 0"></a-cylinder>
+        <a-cylinder color="#b8860b" metalness="0.7" roughness="0.3" radius="0.2" height="0.06" position="0 -0.33 0"></a-cylinder>
+        <a-torus color="#d4af37" metalness="0.9" roughness="0.2" radius="0.2" tube="0.03" position="0 0.15 0" rotation="90 0 0"></a-torus>
+        <a-sphere color="#ffd700" metalness="0.9" roughness="0.1" radius="0.08" position="0 0.4 0.25"></a-sphere>
+      </a-entity>
+    </a-marker>
+
+    <!-- ===== MARCADOR 1 (Pieza 2) ===== -->
+    <a-marker type="barcode" value="1" id="marker-1">
+      <a-entity touch-controls position="0 0 -0.3" scale="0.35 0.35 0.35">
+        <!-- Figurilla Moche (terracota) -->
+        <a-box color="#c87333" roughness="0.9" metalness="0.1" width="0.3" height="0.5" depth="0.2"></a-box>
+        <a-sphere color="#c87333" roughness="0.9" metalness="0.1" radius="0.16" position="0 0.35 0"></a-sphere>
+        <a-cylinder color="#a0522d" roughness="0.9" radius="0.04" height="0.3" position="-0.2 0.1 0" rotation="0 0 20"></a-cylinder>
+        <a-cylinder color="#a0522d" roughness="0.9" radius="0.04" height="0.3" position="0.2 0.1 0" rotation="0 0 -20"></a-cylinder>
+        <a-torus color="#e0a060" roughness="0.8" radius="0.12" tube="0.02" position="0 -0.2 0" rotation="90 0 0"></a-torus>
+      </a-entity>
+    </a-marker>
+
+    <!-- ===== MARCADOR 2 (Pieza 3) ===== -->
+    <a-marker type="barcode" value="2" id="marker-2">
+      <a-entity touch-controls position="0 0 -0.3" scale="0.4 0.4 0.4">
+        <!-- Plato/textil Nazca (plata/azul) -->
+        <a-torus color="#4a7c9e" metalness="0.6" roughness="0.3" radius="0.4" tube="0.05" rotation="90 0 0"></a-torus>
+        <a-cylinder color="#3a5f7a" metalness="0.5" roughness="0.4" radius="0.08" height="0.25" position="0 -0.25 0"></a-cylinder>
+        <a-torus color="#b0c4de" metalness="0.3" roughness="0.5" radius="0.3" tube="0.02" position="0 0.02 0" rotation="90 0 0"></a-torus>
+        <a-sphere color="#ffd700" metalness="0.8" roughness="0.2" radius="0.06" position="0 0 0.35"></a-sphere>
+      </a-entity>
+    </a-marker>
+
+    <!-- Luz ambiental para los modelos -->
+    <a-light type="ambient" color="#ffffff" intensity="0.6"></a-light>
+    <a-light type="directional" color="#ffffff" intensity="0.8" position="1 2 1"></a-light>
+    <a-light type="directional" color="#ffffff" intensity="0.4" position="-1 0.5 -1"></a-light>
+  </a-scene>
+
+  <!-- ============ OVERLAY UI ============ -->
+  <div id="ui-overlay" class="hidden">
+    <div id="info-card">
+      <div class="card-header">
+        <h2 id="piece-title">Pieza</h2>
+        <button class="favorite-btn" id="fav-btn" aria-label="Agregar a favoritos">♡</button>
+      </div>
+      <div class="card-body">
+        <img id="piece-img" class="thumb-img" src="" alt="Detalle de la pieza" />
+        <p id="piece-desc">Descripción breve de la pieza.</p>
+      </div>
+
+      <div class="audio-row">
+        <button class="audio-btn" id="audio-btn">🔊 Escuchar</button>
+        <div class="volume-control">
+          <span class="vol-icon">🔉</span>
+          <input type="range" id="volume-slider" min="0" max="1" step="0.05" value="0.8">
+          <span class="vol-icon">🔊</span>
+        </div>
+      </div>
+
+      <div id="subtitles"></div>
+    </div>
+  </div>
+
+  <!-- ============ MODAL DE IMAGEN ============ -->
+  <div id="image-modal">
+    <span class="close-modal" id="modal-close">✕</span>
+    <img id="modal-img" src="" alt="Ampliación de la pieza">
+  </div>
+
+  <!-- ============ PIE DE PRIVACIDAD ============ -->
+  <div id="privacy-footer">🔒 Cámara local · No almacenamos vídeo</div>
+
+  <!-- ============================================================ -->
+  <!-- ==================== JAVASCRIPT ============================= -->
+  <!-- ============================================================ -->
+  <script>
+    (function() {
+      'use strict';
+
+      // ---------- DATOS DE LAS 3 PIEZAS ----------
+      const PIECES = {
+        0: {
+          title: 'Vaso Ceremonial Moche',
+          desc: 'Vaso retrato de la cultura Moche (100-700 d.C.). Representa a un gobernante con tocado y nariguera. Usado en rituales de élite.',
+          script: 'Vaso ceremonial Moche, del periodo 100 al 700 después de Cristo. Este vaso retrato representa a un gobernante con tocado y nariguera. Era utilizado exclusivamente en rituales de la élite moche para servir chicha de maíz.',
+          img: 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"%3E%3Crect width="100" height="100" fill="%232a2a3e"/%3E%3Ccircle cx="50" cy="50" r="40" fill="%23d4af37"/%3E%3Cpath d="M30 30 L70 30 L60 70 L40 70 Z" fill="%23b8860b"/%3E%3Ccircle cx="50" cy="45" r="8" fill="%23ffd700"/%3E%3Ctext x="50" y="92" font-size="12" fill="%23fff" text-anchor="middle" font-family="sans-serif" font-weight="bold" opacity="0.8">VASO MOCHE</text%3E%3C/svg%3E'
+        },
+        1: {
+          title: 'Figurilla Moche',
+          desc: 'Figurilla antropomorfa de cerámica, cultura Moche (200-600 d.C.). Representa a un guerrero o sacerdote con ornamentos.',
+          script: 'Figurilla antropomorfa de cerámica moche, del periodo 200 al 600 después de Cristo. Representa a un guerrero o sacerdote con ornamentos corporales. Los colores terracota y crema son característicos de esta tradición alfarera.',
+          img: 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"%3E%3Crect width="100" height="100" fill="%232a2a3e"/%3E%3Ccircle cx="50" cy="35" r="22" fill="%23c87333"/%3E%3Crect x="35" y="55" width="30" height="25" fill="%23a0522d" rx="4"/%3E%3Crect x="20" y="60" width="12" height="18" fill="%23a0522d" rx="2"/%3E%3Crect x="68" y="60" width="12" height="18" fill="%23a0522d" rx="2"/%3E%3Ctext x="50" y="94" font-size="10" fill="%23fff" text-anchor="middle" font-family="sans-serif" font-weight="bold" opacity="0.8">FIGURILLA</text%3E%3C/svg%3E'
+        },
+        2: {
+          title: 'Plato Nazca',
+          desc: 'Plato ceremonial de la cultura Nazca (200-500 d.C.). Decorado con motivos de aves y criaturas míticas. Técnica de pintura pre-cocción.',
+          script: 'Plato ceremonial Nazca, del periodo 200 al 500 después de Cristo. Destaca por su decoración con aves y criaturas míticas. Usaban la técnica de pintura pre-cocción con pigmentos minerales de gran durabilidad.',
+          img: 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"%3E%3Crect width="100" height="100" fill="%232a2a3e"/%3E%3Ccircle cx="50" cy="50" r="38" fill="%234a7c9e"/%3E%3Ccircle cx="50" cy="50" r="28" fill="%23b0c4de"/%3E%3Cpath d="M30 50 Q50 25 70 50 Q50 75 30 50" fill="%23ffd700" opacity="0.7"/%3E%3Ctext x="50" y="94" font-size="11" fill="%23fff" text-anchor="middle" font-family="sans-serif" font-weight="bold" opacity="0.8">PLATO NAZCA</text%3E%3C/svg%3E'
+        }
+      };
+
+      // ---------- DOM REFS ----------
+      const uiOverlay = document.getElementById('ui-overlay');
+      const titleEl = document.getElementById('piece-title');
+      const descEl = document.getElementById('piece-desc');
+      const imgEl = document.getElementById('piece-img');
+      const favBtn = document.getElementById('fav-btn');
+      const audioBtn = document.getElementById('audio-btn');
+      const volumeSlider = document.getElementById('volume-slider');
+      const subtitlesEl = document.getElementById('subtitles');
+      const modal = document.getElementById('image-modal');
+      const modalImg = document.getElementById('modal-img');
+      const modalClose = document.getElementById('modal-close');
+      const startScreen = document.getElementById('start-screen');
+      const startBtn = document.getElementById('start-btn');
+
+      // ---------- ESTADO ----------
+      let currentId = null;
+      let isPlaying = false;
+      let speechUtterance = null;
+      let subtitleTimeouts = [];
+      let favoriteIds = JSON.parse(localStorage.getItem('museo_favs') || '[]');
+
+      // ---------- COMPONENTE A-FRAME: TOUCH CONTROLS (rotar y escalar) ----------
+      AFRAME.registerComponent('touch-controls', {
+        init: function() {
+          this.el.scale.set(1, 1, 1);
+          this.lastTouchDist = 0;
+          this.lastTouchX = 0;
+          this.lastTouchY = 0;
+          this.isRotating = false;
+          this.isScaling = false;
+          // Usamos el evento de la escena directamente
+          this.el.addEventListener('touchstart', this.onTouchStart.bind(this));
+          this.el.addEventListener('touchmove', this.onTouchMove.bind(this));
+          this.el.addEventListener('touchend', this.onTouchEnd.bind(this));
+        },
+        onTouchStart: function(e) {
+          e.preventDefault();
+          const touches = e.touches;
+          if (touches.length === 1) {
+            this.isRotating = true;
+            this.lastTouchX = touches[0].clientX;
+            this.lastTouchY = touches[0].clientY;
+          } else if (touches.length === 2) {
+            this.isScaling = true;
+            this.isRotating = false;
+            const dx = touches[0].clientX - touches[1].clientX;
+            const dy = touches[0].clientY - touches[1].clientY;
+            this.lastTouchDist = Math.hypot(dx, dy);
+          }
+        },
+        onTouchMove: function(e) {
+          e.preventDefault();
+          const touches = e.touches;
+          if (this.isRotating && touches.length === 1) {
+            const deltaX = touches[0].clientX - this.lastTouchX;
+            const deltaY = touches[0].clientY - this.lastTouchY;
+            // Rotar en Y y X
+            this.el.object3D.rotation.y += deltaX * 0.01;
+            this.el.object3D.rotation.x += deltaY * 0.01;
+            this.lastTouchX = touches[0].clientX;
+            this.lastTouchY = touches[0].clientY;
+          } else if (this.isScaling && touches.length === 2) {
+            const dx = touches[0].clientX - touches[1].clientX;
+            const dy = touches[0].clientY - touches[1].clientY;
+            const dist = Math.hypot(dx, dy);
+            if (this.lastTouchDist > 0) {
+              const scaleFactor = dist / this.lastTouchDist;
+              const currentScale = this.el.object3D.scale.x;
+              let newScale = currentScale * scaleFactor;
+              newScale = Math.min(Math.max(newScale, 0.3), 3.0);
+              this.el.object3D.scale.set(newScale, newScale, newScale);
+            }
+            this.lastTouchDist = dist;
+          }
+        },
+        onTouchEnd: function(e) {
+          this.isRotating = false;
+          this.isScaling = false;
+        }
+      });
+
+      // ---------- FUNCIONES UI ----------
+      function updateFavButton() {
+        if (currentId === null) return;
+        const isFav = favoriteIds.includes(currentId);
+        favBtn.textContent = isFav ? '❤️' : '♡';
+        favBtn.classList.toggle('fav', isFav);
+      }
+
+      function toggleFavorite() {
+        if (currentId === null) return;
+        const idx = favoriteIds.indexOf(currentId);
+        if (idx === -1) {
+          favoriteIds.push(currentId);
+        } else {
+          favoriteIds.splice(idx, 1);
+        }
+        localStorage.setItem('museo_favs', JSON.stringify(favoriteIds));
+        updateFavButton();
+      }
+
+      function showPiece(id) {
+        currentId = id;
+        const data = PIECES[id];
+        if (!data) return;
+
+        titleEl.textContent = data.title;
+        descEl.textContent = data.desc;
+        imgEl.src = data.img;
+        imgEl.alt = data.title;
+
+        // Mostrar overlay
+        uiOverlay.classList.remove('hidden');
+        updateFavButton();
+
+        // Resetear audio
+        stopAudio();
+        subtitlesEl.textContent = '';
+        audioBtn.textContent = '🔊 Escuchar';
+        audioBtn.classList.remove('playing');
+      }
+
+      function hidePiece() {
+        currentId = null;
+        uiOverlay.classList.add('hidden');
+        stopAudio();
+        subtitlesEl.textContent = '';
+        audioBtn.textContent = '🔊 Escuchar';
+        audioBtn.classList.remove('playing');
+      }
+
+      // ---------- AUDIO Y SUBTÍTULOS (Speech Synthesis) ----------
+      function stopAudio() {
+        if (speechUtterance) {
+          window.speechSynthesis.cancel();
+          speechUtterance = null;
+        }
+        isPlaying = false;
+        subtitleTimeouts.forEach(t => clearTimeout(t));
+        subtitleTimeouts = [];
+        audioBtn.textContent = '🔊 Escuchar';
+        audioBtn.classList.remove('playing');
+      }
+
+      function playAudio() {
+        if (currentId === null) return;
+        if (isPlaying) {
+          stopAudio();
+          return;
+        }
+
+        const data = PIECES[currentId];
+        const fullText = data.script;
+        if (!fullText) return;
+
+        // Dividir en oraciones para subtítulos
+        const sentences = fullText.match(/[^.!?]+[.!?]+/g) || [fullText];
+        
+        // Limpiar subtítulos anteriores
+        subtitleTimeouts.forEach(t => clearTimeout(t));
+        subtitleTimeouts = [];
+
+        // Crear utterance
+        speechUtterance = new SpeechSynthesisUtterance(fullText);
+        speechUtterance.lang = 'es-ES';
+        speechUtterance.rate = 0.9;
+        speechUtterance.pitch = 1;
+        speechUtterance.volume = parseFloat(volumeSlider.value);
+
+        // Calcular tiempos estimados por oración (0.3 seg por palabra + 0.5s pausa)
+        let cumulativeTime = 0;
+        sentences.forEach((sentence, index) => {
+          const wordCount = sentence.split(' ').length;
+          const duration = Math.max(1.2, wordCount * 0.3) + 0.5;
+          const delay = cumulativeTime * 1000;
+          const timeout = setTimeout(() => {
+            subtitlesEl.textContent = sentence.trim();
+          }, delay);
+          subtitleTimeouts.push(timeout);
+          cumulativeTime += duration;
+        });
+
+        // Ocultar subtítulos al final
+        const finalTimeout = setTimeout(() => {
+          subtitlesEl.textContent = '';
+        }, cumulativeTime * 1000 + 500);
+        subtitleTimeouts.push(finalTimeout);
+
+        // Eventos del utterance
+        speechUtterance.onstart = () => {
+          isPlaying = true;
+          audioBtn.textContent = '⏹ Detener';
+          audioBtn.classList.add('playing');
+        };
+        speechUtterance.onend = () => {
+          isPlaying = false;
+          audioBtn.textContent = '🔊 Escuchar';
+          audioBtn.classList.remove('playing');
+          speechUtterance = null;
+          subtitlesEl.textContent = '';
+          subtitleTimeouts.forEach(t => clearTimeout(t));
+          subtitleTimeouts = [];
+        };
+        speechUtterance.onerror = () => {
+          isPlaying = false;
+          audioBtn.textContent = '🔊 Escuchar';
+          audioBtn.classList.remove('playing');
+          speechUtterance = null;
+          subtitlesEl.textContent = '⚠️ Error de audio';
+        };
+
+        // Reproducir
+        window.speechSynthesis.speak(speechUtterance);
+      }
+
+      // ---------- EVENTOS AR (detección de marcadores) ----------
+      const scene = document.querySelector('a-scene');
+      
+      scene.addEventListener('markerFound', (e) => {
+        const marker = e.target;
+        if (!marker || !marker.id) return;
+        const id = marker.getAttribute('value');
+        if (id !== null && id !== undefined && PIECES[id]) {
+          showPiece(parseInt(id));
+        }
+      });
+
+      scene.addEventListener('markerLost', (e) => {
+        const marker = e.target;
+        if (!marker) return;
+        // Solo ocultamos si el marker perdido es el que está activo
+        const id = marker.getAttribute('value');
+        if (currentId !== null && id !== null && parseInt(id) === currentId) {
+          hidePiece();
+        }
+      });
+
+      // ---------- EVENTOS UI ----------
+      favBtn.addEventListener('click', toggleFavorite);
+
+      audioBtn.addEventListener('click', playAudio);
+
+      volumeSlider.addEventListener('input', (e) => {
+        if (speechUtterance) {
+          speechUtterance.volume = parseFloat(e.target.value);
+        }
+      });
+
+      // Ampliar imagen (modal)
+      imgEl.addEventListener('click', () => {
+        if (currentId === null) return;
+        const data = PIECES[currentId];
+        modalImg.src = data.img;
+        modal.classList.add('active');
+      });
+      modalClose.addEventListener('click', () => modal.classList.remove('active'));
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.classList.remove('active');
+      });
+
+      // Pantalla de inicio
+      startBtn.addEventListener('click', async () => {
+        // Solicitar permisos de cámara explícitamente
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+          stream.getTracks().forEach(t => t.stop()); // solo para permiso
+        } catch (err) {
+          alert('Necesitamos acceso a la cámara para la realidad aumentada. Por favor, permite el acceso.');
+          return;
+        }
+        startScreen.classList.add('hidden');
+        // Forzar arranque de AR
+        scene.play();
+      });
+
+      // Ocultar el overlay al inicio
+      uiOverlay.classList.add('hidden');
+
+      // Inicializar favs
+      updateFavButton();
+
+      // Evitar que el scroll/touch interfiera
+      document.addEventListener('touchmove', (e) => {
+        if (e.target.closest('#ui-overlay') || e.target.closest('a-scene')) {
+          e.preventDefault();
+        }
+      }, { passive: false });
+
+      console.log('🏛️ Museo Larco WebAR iniciado. Escanea marcadores 0, 1, 2.');
+    })();
+  </script>
+</body>
+</html>
