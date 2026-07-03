@@ -8,17 +8,465 @@
 
   <!-- Librerías A-Frame + AR.js -->
   <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
+  <!-- FIX: volvemos a raw.githack/master (confirmado funcional por el
+       usuario con un ejemplo mínimo), en vez de la build fijada en
+       jsdelivr que se quedaba pegada en la pantalla de carga. -->
   <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
 
   <style>
-    /* (El CSS es exactamente el mismo que el tuyo, no lo repito por brevedad) */
-    /* ... mantenlo igual ... */
+    /* RESET y configuración base */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Segoe UI', Roboto, system-ui, sans-serif;
+      background: #111;
+      color: #fff;
+      overflow: hidden;
+      height: 100vh;
+      width: 100vw;
+      touch-action: none;
+    }
+
+    /* La escena AR ocupa toda la pantalla */
+    a-scene {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+    }
+
+    /* FIX: ocultar por completo cualquier botón de entrar en VR/AR que
+       A-Frame pudiera inyectar (esto es lo que abría el flujo
+       "usar otro dispositivo" en vez de la cámara AR.js) */
+    .a-enter-vr,
+    .a-enter-ar,
+    .a-orientation-modal {
+      display: none !important;
+      pointer-events: none !important;
+    }
+
+    /* ---------- OVERLAY DE UI (por encima de la cámara) ---------- */
+    #ui-overlay {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      z-index: 10;
+      pointer-events: none;
+      /* Deja pasar toques a la escena AR si es necesario */
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-end;
+      padding: 16px;
+      padding-bottom: 20px;
+      background: linear-gradient(0deg, rgba(0, 0, 0, 0.85) 0%, rgba(0, 0, 0, 0) 100%);
+      transition: opacity 0.4s ease;
+    }
+
+    #ui-overlay.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    /* TARJETA INFORMATIVA (interactiva) */
+    #info-card {
+      pointer-events: auto;
+      background: rgba(20, 20, 30, 0.92);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-radius: 24px 24px 16px 16px;
+      padding: 20px 18px;
+      width: 100%;
+      max-width: 480px;
+      max-height: 65vh;
+      overflow-y: auto;
+      border: 1px solid rgba(255, 215, 0, 0.3);
+      box-shadow: 0 8px 40px rgba(0, 0, 0, 0.7);
+      transition: transform 0.3s ease;
+      scrollbar-width: thin;
+      scrollbar-color: #f0c040 #222;
+    }
+
+    #info-card::-webkit-scrollbar {
+      width: 4px;
+    }
+
+    #info-card::-webkit-scrollbar-track {
+      background: #222;
+      border-radius: 8px;
+    }
+
+    #info-card::-webkit-scrollbar-thumb {
+      background: #f0c040;
+      border-radius: 8px;
+    }
+
+    /* Cabecera de la tarjeta */
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+    #piece-title {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #f0c040;
+      letter-spacing: -0.5px;
+      line-height: 1.2;
+      flex: 1;
+    }
+
+    .favorite-btn {
+      background: none;
+      border: none;
+      font-size: 2rem;
+      cursor: pointer;
+      padding: 0 6px;
+      transition: transform 0.2s;
+      pointer-events: auto;
+      line-height: 1;
+      filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.5));
+    }
+
+    .favorite-btn:active {
+      transform: scale(1.3);
+    }
+
+    .favorite-btn.fav {
+      color: #ff3b30;
+      text-shadow: 0 0 12px #ff3b3080;
+    }
+
+    .favorite-btn:not(.fav) {
+      color: #888;
+    }
+
+    /* Cuerpo: imagen + descripción */
+    .card-body {
+      display: flex;
+      flex-direction: row;
+      gap: 14px;
+      margin-top: 6px;
+      align-items: flex-start;
+    }
+
+    .thumb-img {
+      width: 80px;
+      height: 80px;
+      min-width: 80px;
+      border-radius: 16px;
+      background: #2a2a3a;
+      object-fit: cover;
+      border: 2px solid #444;
+      cursor: zoom-in;
+      transition: 0.2s;
+    }
+
+    .thumb-img:active {
+      transform: scale(0.95);
+    }
+
+    #piece-desc {
+      font-size: 0.95rem;
+      line-height: 1.5;
+      color: #e0e0e0;
+      font-weight: 400;
+      flex: 1;
+      margin: 0;
+      max-height: 100px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+
+    /* Controles de audio y subtítulos */
+    .audio-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 14px;
+      background: rgba(255, 255, 255, 0.06);
+      padding: 10px 14px;
+      border-radius: 40px;
+      border: 1px solid #3a3a4a;
+    }
+
+    .audio-btn {
+      background: #f0c040;
+      border: none;
+      color: #111;
+      font-weight: 700;
+      padding: 8px 20px;
+      border-radius: 40px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: 0.2s;
+      white-space: nowrap;
+      pointer-events: auto;
+    }
+
+    .audio-btn:active {
+      transform: scale(0.95);
+      background: #d4a830;
+    }
+
+    .audio-btn.playing {
+      background: #e74c3c;
+      color: #fff;
+    }
+
+    .volume-control {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex: 1;
+    }
+
+    .volume-control input[type="range"] {
+      width: 100%;
+      height: 4px;
+      -webkit-appearance: none;
+      background: #555;
+      border-radius: 4px;
+      outline: none;
+    }
+
+    .volume-control input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #f0c040;
+      cursor: pointer;
+    }
+
+    .vol-icon {
+      font-size: 1.2rem;
+      opacity: 0.7;
+    }
+
+    #subtitles {
+      margin-top: 8px;
+      font-size: 1.05rem;
+      font-weight: 500;
+      color: #fff;
+      background: rgba(0, 0, 0, 0.75);
+      padding: 10px 16px;
+      border-radius: 40px;
+      text-align: center;
+      min-height: 3.2rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid #f0c04060;
+      backdrop-filter: blur(4px);
+      width: 100%;
+      transition: 0.2s;
+      line-height: 1.4;
+    }
+
+    #subtitles:empty::before {
+      content: "🎧 Presiona 'Escuchar' para activar subtítulos";
+      color: #aaa;
+      font-weight: 300;
+      font-size: 0.9rem;
+    }
+
+    /* MODAL para imagen ampliada */
+    #image-modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.92);
+      z-index: 100;
+      display: none;
+      justify-content: center;
+      align-items: center;
+      pointer-events: auto;
+      backdrop-filter: blur(8px);
+    }
+
+    #image-modal.active {
+      display: flex;
+    }
+
+    #image-modal img {
+      max-width: 92%;
+      max-height: 92%;
+      border-radius: 20px;
+      border: 3px solid #f0c040;
+      box-shadow: 0 0 60px rgba(240, 192, 64, 0.3);
+      object-fit: contain;
+    }
+
+    #image-modal .close-modal {
+      position: absolute;
+      top: 30px;
+      right: 30px;
+      font-size: 2.8rem;
+      color: #fff;
+      background: rgba(0, 0, 0, 0.6);
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      border: 2px solid #f0c040;
+      font-weight: 300;
+    }
+
+    /* Pantalla de inicio (permisos + instrucciones) */
+    #start-screen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: radial-gradient(circle at 50% 30%, #1a1a2e, #0a0a12);
+      z-index: 200;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      padding: 30px;
+      text-align: center;
+      gap: 20px;
+      transition: opacity 0.6s;
+    }
+
+    #start-screen.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    #start-screen h1 {
+      font-size: 2.2rem;
+      color: #f0c040;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+
+    #start-screen p {
+      font-size: 1.1rem;
+      max-width: 400px;
+      color: #ccc;
+      line-height: 1.6;
+    }
+
+    .start-btn {
+      background: #f0c040;
+      color: #111;
+      border: none;
+      padding: 16px 48px;
+      border-radius: 60px;
+      font-size: 1.4rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: 0.3s;
+      box-shadow: 0 0 40px #f0c04040;
+      margin-top: 10px;
+    }
+
+    .start-btn:active {
+      transform: scale(0.96);
+    }
+
+    .privacy-note {
+      font-size: 0.75rem;
+      color: #888;
+      max-width: 360px;
+      margin-top: 20px;
+      border-top: 1px solid #333;
+      padding-top: 20px;
+    }
+
+    .marker-hint {
+      display: flex;
+      gap: 20px;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin: 8px 0;
+    }
+
+    .marker-hint span {
+      background: #2a2a3e;
+      padding: 6px 18px;
+      border-radius: 40px;
+      font-size: 0.9rem;
+      border: 1px solid #444;
+      color: #ddd;
+    }
+
+    /* Política de privacidad fija */
+    #privacy-footer {
+      position: fixed;
+      bottom: 6px;
+      right: 12px;
+      z-index: 5;
+      font-size: 0.6rem;
+      color: #666;
+      background: rgba(0, 0, 0, 0.5);
+      padding: 4px 12px;
+      border-radius: 20px;
+      pointer-events: none;
+    }
+
+    /* Ajustes responsivos */
+    @media (max-width: 480px) {
+      #piece-title {
+        font-size: 1.3rem;
+      }
+
+      .card-body {
+        flex-direction: column;
+        align-items: center;
+      }
+
+      .thumb-img {
+        width: 100%;
+        height: auto;
+        max-height: 140px;
+        min-width: unset;
+      }
+
+      #piece-desc {
+        max-height: 80px;
+        font-size: 0.9rem;
+        text-align: center;
+      }
+
+      .audio-row {
+        flex-wrap: wrap;
+        justify-content: center;
+      }
+
+      #subtitles {
+        font-size: 0.95rem;
+        min-height: 2.8rem;
+      }
+    }
   </style>
 </head>
 
 <body>
 
-  <!-- Pantalla de inicio (idéntica) -->
+  <!-- ============ PANTALLA DE INICIO ============ -->
   <div id="start-screen">
     <h1>🏛️ Museo Larco</h1>
     <p style="font-size:1.3rem; color:#f0c040;">Guía Aumentada WebAR</p>
@@ -40,17 +488,21 @@
   </div>
 
   <!-- ============ ESCENA AR ============ -->
+  <!-- FIX: "arjs" se declara directo aquí (como en el ejemplo mínimo que
+       confirmaste que funciona), en vez de agregarlo después con JS al
+       hacer clic en "Iniciar experiencia". -->
   <a-scene id="ar-scene" embedded
     arjs="trackingMethod: best; sourceType: webcam; debugUIEnabled: false; detectionMode: mono_and_matrix; matrixCodeType: 3x3;"
     renderer="antialias: true; alpha: true;" vr-mode-ui="enabled: false"
     device-orientation-permission-ui="enabled: false">
 
+    <!-- FIX: cámara explícita requerida por AR.js -->
     <a-entity camera></a-entity>
 
     <!-- ===== MARCADOR 0 (Pieza 1) ===== -->
     <a-marker type="barcode" value="0" id="marker-0">
-      <!-- AÑADIDO touch-controls -->
-      <a-entity touch-controls position="0 0 -0.3" scale="0.4 0.4 0.4">
+      <!-- Modelo 3D: Vaso ceremonial (oro) -->
+      <a-entity position="0 0 -0.3" scale="0.4 0.4 0.4">
         <a-cylinder color="#d4af37" metalness="0.8" roughness="0.2" radius="0.3" height="0.6"></a-cylinder>
         <a-cylinder color="#b8860b" metalness="0.7" roughness="0.3" radius="0.35" height="0.08"
           position="0 0.34 0"></a-cylinder>
@@ -64,7 +516,8 @@
 
     <!-- ===== MARCADOR 1 (Pieza 2) ===== -->
     <a-marker type="barcode" value="1" id="marker-1">
-      <a-entity touch-controls position="0 0 -0.3" scale="0.35 0.35 0.35">
+      <a-entity position="0 0 -0.3" scale="0.35 0.35 0.35">
+        <!-- Figurilla Moche (terracota) -->
         <a-box color="#c87333" roughness="0.9" metalness="0.1" width="0.3" height="0.5" depth="0.2"></a-box>
         <a-sphere color="#c87333" roughness="0.9" metalness="0.1" radius="0.16" position="0 0.35 0"></a-sphere>
         <a-cylinder color="#a0522d" roughness="0.9" radius="0.04" height="0.3" position="-0.2 0.1 0"
@@ -78,7 +531,8 @@
 
     <!-- ===== MARCADOR 2 (Pieza 3) ===== -->
     <a-marker type="barcode" value="2" id="marker-2">
-      <a-entity touch-controls position="0 0 -0.3" scale="0.4 0.4 0.4">
+      <a-entity position="0 0 -0.3" scale="0.4 0.4 0.4">
+        <!-- Plato/textil Nazca (plata/azul) -->
         <a-torus color="#4a7c9e" metalness="0.6" roughness="0.3" radius="0.4" tube="0.05" rotation="90 0 0"></a-torus>
         <a-cylinder color="#3a5f7a" metalness="0.5" roughness="0.4" radius="0.08" height="0.25"
           position="0 -0.25 0"></a-cylinder>
@@ -88,7 +542,7 @@
       </a-entity>
     </a-marker>
 
-    <!-- Luces -->
+    <!-- Luz ambiental para los modelos -->
     <a-light type="ambient" color="#ffffff" intensity="0.6"></a-light>
     <a-light type="directional" color="#ffffff" intensity="0.8" position="1 2 1"></a-light>
     <a-light type="directional" color="#ffffff" intensity="0.4" position="-1 0.5 -1"></a-light>
@@ -134,64 +588,6 @@
   <script>
     (function () {
       'use strict';
-
-      // ---------- REGISTRO DEL COMPONENTE TOUCH-CONTROLS (FALTABA) ----------
-      AFRAME.registerComponent('touch-controls', {
-        init: function () {
-          this.el.scale.set(1, 1, 1);
-          this.lastTouchDist = 0;
-          this.lastTouchX = 0;
-          this.lastTouchY = 0;
-          this.isRotating = false;
-          this.isScaling = false;
-          this.el.addEventListener('touchstart', this.onTouchStart.bind(this));
-          this.el.addEventListener('touchmove', this.onTouchMove.bind(this));
-          this.el.addEventListener('touchend', this.onTouchEnd.bind(this));
-        },
-        onTouchStart: function (e) {
-          e.preventDefault();
-          const touches = e.touches;
-          if (touches.length === 1) {
-            this.isRotating = true;
-            this.lastTouchX = touches[0].clientX;
-            this.lastTouchY = touches[0].clientY;
-          } else if (touches.length === 2) {
-            this.isScaling = true;
-            this.isRotating = false;
-            const dx = touches[0].clientX - touches[1].clientX;
-            const dy = touches[0].clientY - touches[1].clientY;
-            this.lastTouchDist = Math.hypot(dx, dy);
-          }
-        },
-        onTouchMove: function (e) {
-          e.preventDefault();
-          const touches = e.touches;
-          if (this.isRotating && touches.length === 1) {
-            const deltaX = touches[0].clientX - this.lastTouchX;
-            const deltaY = touches[0].clientY - this.lastTouchY;
-            this.el.object3D.rotation.y += deltaX * 0.01;
-            this.el.object3D.rotation.x += deltaY * 0.01;
-            this.lastTouchX = touches[0].clientX;
-            this.lastTouchY = touches[0].clientY;
-          } else if (this.isScaling && touches.length === 2) {
-            const dx = touches[0].clientX - touches[1].clientX;
-            const dy = touches[0].clientY - touches[1].clientY;
-            const dist = Math.hypot(dx, dy);
-            if (this.lastTouchDist > 0) {
-              const scaleFactor = dist / this.lastTouchDist;
-              const currentScale = this.el.object3D.scale.x;
-              let newScale = currentScale * scaleFactor;
-              newScale = Math.min(Math.max(newScale, 0.3), 3.0);
-              this.el.object3D.scale.set(newScale, newScale, newScale);
-            }
-            this.lastTouchDist = dist;
-          }
-        },
-        onTouchEnd: function (e) {
-          this.isRotating = false;
-          this.isScaling = false;
-        }
-      });
 
       // ---------- DATOS DE LAS 3 PIEZAS ----------
       const PIECES = {
@@ -267,9 +663,11 @@
         imgEl.src = data.img;
         imgEl.alt = data.title;
 
+        // Mostrar overlay
         uiOverlay.classList.remove('hidden');
         updateFavButton();
 
+        // Resetear audio
         stopAudio();
         subtitlesEl.textContent = '';
         audioBtn.textContent = '🔊 Escuchar';
@@ -285,7 +683,7 @@
         audioBtn.classList.remove('playing');
       }
 
-      // ---------- AUDIO ----------
+      // ---------- AUDIO Y SUBTÍTULOS (Speech Synthesis) ----------
       function stopAudio() {
         if (speechUtterance) {
           window.speechSynthesis.cancel();
@@ -309,18 +707,23 @@
         const fullText = data.script;
         if (!fullText) return;
 
+        // Dividir en oraciones para subtítulos
         const sentences = fullText.match(/[^.!?]+[.!?]+/g) || [fullText];
+
+        // Limpiar subtítulos anteriores
         subtitleTimeouts.forEach(t => clearTimeout(t));
         subtitleTimeouts = [];
 
+        // Crear utterance
         speechUtterance = new SpeechSynthesisUtterance(fullText);
         speechUtterance.lang = 'es-ES';
         speechUtterance.rate = 0.9;
         speechUtterance.pitch = 1;
         speechUtterance.volume = parseFloat(volumeSlider.value);
 
+        // Calcular tiempos estimados por oración (0.3 seg por palabra + 0.5s pausa)
         let cumulativeTime = 0;
-        sentences.forEach((sentence) => {
+        sentences.forEach((sentence, index) => {
           const wordCount = sentence.split(' ').length;
           const duration = Math.max(1.2, wordCount * 0.3) + 0.5;
           const delay = cumulativeTime * 1000;
@@ -331,11 +734,13 @@
           cumulativeTime += duration;
         });
 
+        // Ocultar subtítulos al final
         const finalTimeout = setTimeout(() => {
           subtitlesEl.textContent = '';
         }, cumulativeTime * 1000 + 500);
         subtitleTimeouts.push(finalTimeout);
 
+        // Eventos del utterance
         speechUtterance.onstart = () => {
           isPlaying = true;
           audioBtn.textContent = '⏹ Detener';
@@ -358,10 +763,11 @@
           subtitlesEl.textContent = '⚠️ Error de audio';
         };
 
+        // Reproducir
         window.speechSynthesis.speak(speechUtterance);
       }
 
-      // ---------- EVENTOS AR ----------
+      // ---------- EVENTOS AR (detección de marcadores) ----------
       const scene = document.querySelector('a-scene');
 
       scene.addEventListener('markerFound', (e) => {
@@ -376,6 +782,7 @@
       scene.addEventListener('markerLost', (e) => {
         const marker = e.target;
         if (!marker) return;
+        // Solo ocultamos si el marker perdido es el que está activo
         const id = marker.getAttribute('value');
         if (currentId !== null && id !== null && parseInt(id) === currentId) {
           hidePiece();
@@ -384,13 +791,16 @@
 
       // ---------- EVENTOS UI ----------
       favBtn.addEventListener('click', toggleFavorite);
+
       audioBtn.addEventListener('click', playAudio);
+
       volumeSlider.addEventListener('input', (e) => {
         if (speechUtterance) {
           speechUtterance.volume = parseFloat(e.target.value);
         }
       });
 
+      // Ampliar imagen (modal)
       imgEl.addEventListener('click', () => {
         if (currentId === null) return;
         const data = PIECES[currentId];
@@ -404,24 +814,29 @@
 
       // Pantalla de inicio
       startBtn.addEventListener('click', () => {
+        // Ocultar pantalla de inicio
         startScreen.classList.add('hidden');
-        subtitlesEl.textContent = '📷 Cámara activa. Apunta a un marcador';
+
+        // Mostrar feedback en los subtítulos mientras carga
+        subtitlesEl.textContent = '📷 Activando cámara... Apunta a un marcador';
         setTimeout(() => {
           subtitlesEl.textContent = '';
         }, 3000);
       });
-
-      // Inicialización
+      // Ocultar el overlay al inicio
       uiOverlay.classList.add('hidden');
+
+      // Inicializar favs
       updateFavButton();
 
+      // Evitar que el scroll/touch interfiera
       document.addEventListener('touchmove', (e) => {
         if (e.target.closest('#ui-overlay') || e.target.closest('a-scene')) {
           e.preventDefault();
         }
       }, { passive: false });
 
-      console.log('🏛️ Museo Larco WebAR con touch controls restaurados.');
+      console.log('🏛️ Museo Larco WebAR iniciado. Escanea marcadores 0, 1, 2.');
     })();
   </script>
 </body>
